@@ -7,6 +7,9 @@
 ]{scrartcl}
 \usepackage{BenMathTemplate}
 \usepackage{BenTextTemplate}
+\definecolor{red}{rgb}{255,0,0}
+\definecolor{black}{rgb}{0,0,0}
+\newcommand{\mycbox}[1]{\tikz{\path[draw=#1] (0,0) rectangle (8pt,8pt);}}
 
 \title{{\bf Wissenschaftliches Rechnen III / CP III}\\Übungsblatt 5}
 \author{Tizia Kaplan (545978)\\Benjamin Dummer (532716)\\Antoine Hoffmann (???)\\Gruppe 10}
@@ -18,6 +21,18 @@ Online-Version: \href{https://www.github.com/BeDummer/CP3_UE5}{\url{https://www.
 
 \section*{Aufgabe 5.1}
 
+\section*{Aufgabe 5.2}
+Es gilt das \emph{Amdahlsche Gesetz} $S_p(N) \leq \frac{1}{f} $ zu zeigen. Es wird für jede Rechenoperation die Zeit $\Delta_T$ angenommen.
+
+\begin{eqnarray}
+	T_s (N) & = & N \Delta_T \\
+	T_p (N) & = & f N \Delta_T + \dfrac{(1-f)N \Delta_T}{p} \\
+	S_p (N) & = & \dfrac{T_s(N)}{T_p(s)} \\
+		& = & \dfrac{N \Delta_T}{f N \Delta_T + \frac{(1-f) N \Delta_T}{p}} \nonumber \\
+		& = & \dfrac{1}{f+\frac{1-f}{p}} = \dfrac{p}{f (p-1) +\color{red} 1} \nonumber \\
+	\mbox{da } f < 1, & \leq & \dfrac{p}{f (p-1) +\color{red} f} = \dfrac{p}{f p} = \dfrac{1}{f} \quad \quad \mycbox{black} \nonumber
+\end{eqnarray}
+Von der vorletzten zur letzten Zeile wird im Nenner $f-1$ addiert. Da $f<1$ gilt, wird der Nenner durch diesen Schritt kleiner und somit der gesamte Term größer.
 
 \section*{Anhänge}
 \begin{itemize}
