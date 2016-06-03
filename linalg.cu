@@ -224,6 +224,7 @@ __global__ void prod_gpu(double *v, double *a, double *b, int nx, int ny)
 */
 void laplace_2d(double *w, double *v)
 {
+  
    int idx;
    for (idx=0; idx<npts; idx++)
    {
@@ -243,3 +244,4 @@ __global__ void laplace_2d_gpu(double *w, double *v, int nx, int ny)
       w[idx]=4.0*v[idx] - v[idx+1] - v[idx-1] - v[idx+nx+2] - v[idx-nx-2];
    }
 }
+

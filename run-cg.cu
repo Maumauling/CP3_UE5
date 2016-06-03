@@ -29,6 +29,7 @@ int main(int argc, char **argv)
    N=32;
    int dimx = 256;
    int dimy = 1;
+   int dimblock=8;
    if (argc>1)
    {
       N=atoi(argv[1]);
@@ -100,7 +101,7 @@ int main(int argc, char **argv)
       print_active();
 
    random_vector(w);
-   random_vector(v);
+   v[coord2index(Nx/2,Nx/2)]=1.0; // v=0, ausser am Gitterpunkt (Nx/2+1,Ny/2+1)
    double *d_v, *d_w, *d_x, *d_s, *d_vo, *d_rnorm_alt, *d_svo, *d_r, *d_ro, *d_rnorm, *d_sv, *d_vro, *d_vr, *d_vso, *d_vs;
    CHECK(cudaMalloc((void **)&d_v, nBytes));
    CHECK(cudaMalloc((void **)&d_w, nBytes));
@@ -137,101 +138,96 @@ int main(int argc, char **argv)
    CHECK(cudaMemcpy(d_vso, vso, nBytes, cudaMemcpyHostToDevice));
    CHECK(cudaMemcpy(d_vs, vs, nBytes, cudaMemcpyHostToDevice));
    
-   // invoke kernel at host side
-   block.x=dimx;
-   block.y=dimy;
-   block.z=1;
-   grid.x=(Nx + block.x - 1) / block.x;
-   grid.y=(Ny + block.y - 1) / block.y;
-   grid.z=1;
-
-   // Test reduction
-   /*int Nunroll=8;
-   if (npts>256 && Nunroll>1)
-   {
-      double cpu_sum=0.0;
-      iStart = seconds();
-      for (int i = 0; i < npts; i++) cpu_sum += v[i];
-      iElaps = seconds() - iStart;
-      printf("cpu reduce      elapsed %f sec cpu_sum: %f\n", iElaps, cpu_sum);
-
-      dim3 block2 (256,1);
-      int nblk = (npts + (block2.x*Nunroll) - 1)/(block2.x*Nunroll);
-      dim3 grid2 (nblk,1);
-      CHECK(cudaMalloc((void **)&d_x, nblk*sizeof(double)));
-      CHECK(cudaMemset(d_x,0,nblk*sizeof(double)));
-      x=(double*)malloc(nblk*sizeof(double));
-      CHECK(cudaDeviceSynchronize());
-      iStart = seconds();
-      reduceUnrolling<<<grid2, block2>>>(d_v, d_x, npts);
-      CHECK(cudaDeviceSynchronize());
-      iElaps = seconds() - iStart;
-      CHECK(cudaMemcpy(x, d_x, nblk * sizeof(double),cudaMemcpyDeviceToHost));
-
-      double gpu_sum = 0.0;
-      for (int i = 0; i < grid2.x; i++) gpu_sum += x[i];
-
-      printf("gpu Unrolling  elapsed %f sec gpu_sum: %f <<<grid %d block "
-             "%d>>>\n", iElaps, gpu_sum, grid2.x, block2.x);
-
-      assert(abs((gpu_sum-cpu_sum)/cpu_sum)<sqrt(npts)*DBL_EPSILON);
-   }
-
-   // Einheitsvektor
-   memset(v, 0, nBytes);
-   v[coord2index(Nx/2,Nx/2)]=1.0; // v=0, ausser am Gitterpunkt (Nx/2+1,Ny/2+1)
-   print_vector("v",v,1);*/
-   
-   // cg auf gpu
+ 
+   // cg auf gpu	
    
     // Toleranz, Arraysize & Iterationsgrenze festlegen
    double tol = 1e-6;
-   unsigned int kmax = 1e3;
+   unsigned int kmax = 10;
    unsigned int k = 0;
    
-   double size=Nx*Ny;
+  
+   double d_alpha=0;
+   double d_beta=0;
+   double rnormalt_sum =0;
+   double rnorm_sum=0;
+   double vr_sum=0;
+   
+   int Nunroll=8;
+   dim3 block2 (256,1);
+   int nblk = (npts + (block2.x*Nunroll) - 1)/(block2.x*Nunroll);
+   dim3 grid2 (nblk,1);
    
    
    // block dim grid dim
-     dim3 block(dimx,dimy);
+   
+     dim3 block(32,32);
      dim3 grid(((Nx+1+block.x)/block.x), ((Ny+1+block.y)/block.y));
    
-   // 0. Iteration
+    iStart = seconds(); // Messung der GPU Zeit
+    
+   // 0. Iteration bei der r = v
    
    laplace_2d_gpu<<<grid,block>>>(d_s,d_v,Nx,Ny);
-   prod_gpu<<<grid,block>>>(d_vo,d_v,d_v,Nx,Ny);
-   reduceUnrolling<<<grid,block>>>(d_vo,d_rnorm_alt,size);
-   prod_gpu<<<grid,block>>>(d_svo,d_s,d_v,Nx,Ny);
-   reduceUnrolling<<<grid,block>>>(d_svo,d_sv,size);
    
-   double d_alpha= *d_rnorm_alt/ *d_sv;
+   prod_gpu<<<grid,block>>>(d_vo,d_v,d_v,Nx,Ny);
+   reduceUnrolling<<<grid2,block2>>>(d_vo,d_rnorm_alt,npts);
+   CHECK(cudaDeviceSynchronize());
+   CHECK(cudaMemcpy(rnormalt, d_rnorm_alt, nBytes ,cudaMemcpyDeviceToHost));
+   rnormalt_sum=0;
+   for (int i = 0; i < npts; i++) rnormalt_sum += rnormalt[i];
+   
+   printf("0.residuum %f \n", rnormalt_sum);
    
    mul_add_gpu<<<grid,block>>>(d_x,d_alpha,d_v,Nx,Ny);
    vec_add_gpu<<<grid,block>>>(d_r,d_v,(-d_alpha),d_s,Nx,Ny);
    
    prod_gpu<<<grid,block>>>(d_ro,d_r,d_r,Nx,Ny);
-   reduceUnrolling<<<grid,block>>>(d_ro,d_rnorm,size);
+   reduceUnrolling<<<grid2,block2>>>(d_ro,d_rnorm,npts);
+   CHECK(cudaDeviceSynchronize());
+   CHECK(cudaMemcpy(rnorm, d_rnorm, nBytes ,cudaMemcpyDeviceToHost));
+   rnorm_sum=0;
+   for (int i = 0; i < npts; i++) rnorm_sum += rnorm[i];
+  
    
    // Iteration
    
-   while (k<kmax && *rnorm>tol)
+   while (k<kmax && rnorm_sum>tol)
     {
-      double d_beta = *d_rnorm/ *d_rnorm_alt;			// beta= rnorm/rnormalt
+      d_beta = rnorm_sum/ rnormalt_sum;				// beta= rnorm/rnormalt
       update_p_gpu<<<grid,block>>>(d_r,d_beta,d_v,Nx,Ny);	// v = r+beta*v
-      assign_v2v_gpu<<<grid,block>>>(d_rnorm_alt,d_rnorm,Nx,Ny);// rnormalt = rnorm
+      rnormalt_sum=rnorm_sum;
       laplace_2d_gpu<<<grid,block>>>(d_s,d_v,Nx,Ny);		// laplace (s,v)
       
-      prod_gpu<<<grid,block>>>(d_vro,d_v,d_r,Nx,Ny);			// skalarprod v*r
-      reduceUnrolling<<<grid,block>>>(d_vro,d_vr,size);		// skalarprod v*r
-      prod_gpu<<<grid,block>>>(d_vso,d_v,d_s,Nx,Ny);			// skalarprod v*s
-      reduceUnrolling<<<grid,block>>>(d_vso,d_vs,size);		// skalarprod v*s
+      prod_gpu<<<grid,block>>>(d_vro,d_v,d_r,Nx,Ny);		// skalarprod v*r
+      CHECK(cudaDeviceSynchronize());
+      reduceUnrolling<<<grid2,block2>>>(d_vro,d_vr,npts);	// skalarprod v*r
+      CHECK(cudaDeviceSynchronize());
+      CHECK(cudaMemcpy(vr, d_vr, nBytes ,cudaMemcpyDeviceToHost));
+      double vr_sum=0;
+      for (int i = 0; i < npts; i++) vr_sum += vr[i]; 
       
-      d_alpha = *d_vr/ *d_vs;					// alpha = (vr)/(vs)
+      prod_gpu<<<grid,block>>>(d_vso,d_v,d_s,Nx,Ny);		// skalarprod v*s
+      CHECK(cudaDeviceSynchronize());
+      reduceUnrolling<<<grid2,block2>>>(d_vso,d_vs,npts);	// skalarprod v*s
+      CHECK(cudaDeviceSynchronize());
+      CHECK(cudaMemcpy(vs, d_vs, nBytes ,cudaMemcpyDeviceToHost));
+      double vs_sum=0;
+      for (int i = 0; i < npts; i++) vs_sum += vs[i]; 
+      
+      d_alpha = vr_sum/ vs_sum;					// alpha = (vr)/(vs)
       mul_add_gpu<<<grid,block>>>(d_x,d_alpha,d_v,Nx,Ny);	// x = x+alpha*v
       mul_add_gpu<<<grid,block>>>(d_r,(-d_alpha),d_s,Nx,Ny);	// r = r-alpha*s
       
       prod_gpu<<<grid,block>>>(d_ro,d_r,d_r,Nx,Ny);		// rnorm
-      reduceUnrolling<<<grid,block>>>(d_ro,d_rnorm,size);	// rnorm
+      CHECK(cudaDeviceSynchronize());
+      reduceUnrolling<<<grid2,block2>>>(d_ro,d_rnorm,npts);	// rnorm
+      CHECK(cudaDeviceSynchronize());
+      CHECK(cudaMemcpy(rnorm, d_rnorm, nBytes ,cudaMemcpyDeviceToHost));
+      double rnorm_sum=0;
+      for (int i = 0; i < npts; i++) rnorm_sum += rnorm[i];
+      
+      printf("residuum: %f\n",rnorm_sum);
       
       k++;
     }
@@ -239,6 +235,9 @@ int main(int argc, char **argv)
     CHECK(cudaDeviceSynchronize());
     
     CHECK(cudaMemcpy(x, d_x, nBytes, cudaMemcpyDeviceToHost));
+    
+    iElaps = seconds() - iStart; // Ende der Messung der GPU Zeit
+     printf("gpu cg      elapsed %f sec \n", iElaps);
    
    printf("Anzahl Iterationen: %d \n",k);
    print_vector("x_Ergebnis",x,1);
